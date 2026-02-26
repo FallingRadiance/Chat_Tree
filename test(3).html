@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MindFlow - 数学知识导图 (完整版)</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+        
+        body { 
+            font-family: 'Google Sans', system-ui, sans-serif; 
+            background-color: #fff; 
+            overflow: hidden; 
+        }
+
+        /* 左侧聊天流区域 */
+        #chat-flow { scroll-behavior: smooth; }
+        
+        .msg-block {
+            position: relative;
+            padding: 32px;
+            border-left: 4px solid transparent;
+            transition: all 0.5s ease;
+            /* 关键修复：设置滚动边距，确保跳转时标题不被遮挡，且留有呼吸空间 */
+            scroll-margin-top: 20px; 
+        }
+
+        .active-link-pulse {
+            border-left-color: #3b82f6 !important;
+            background-color: rgba(59, 130, 246, 0.03);
+        }
+        .active-link-pulse::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 10% center, rgba(59, 130, 246, 0.12) 0%, transparent 70%);
+            animation: ultra-glow 2s ease-out forwards;
+            pointer-events: none;
+        }
+        @keyframes ultra-glow {
+            0% { opacity: 0; }
+            20% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        /* 3D 视图交互核心样式 */
+        #viewport-3d { 
+            perspective: 1500px; 
+            background: #f8fafd; 
+            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+            background-size: 24px 24px;
+            overflow: hidden; 
+            cursor: grab; 
+            position: relative; 
+            user-select: none;
+        }
+        
+        #viewport-3d.grabbing { cursor: grabbing; }
+
+        #canvas-3d { 
+            transform-style: preserve-3d; 
+            width: 100%; 
+            height: 100%; 
+            position: absolute; 
+            top: 0; 
+            left: 0;
+            transform-origin: 0 0; 
+            will-change: transform;
+        }
+
+        /* 3D 卡片样式 */
+        .card-3d {
+            position: absolute;
+            background: white;
+            border-radius: 12px;
+            padding: 12px 16px;
+            width: 220px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.02);
+            border: 1px solid #eef2f6;
+            transform: rotateX(50deg) rotateZ(-20deg); 
+            transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+        
+        .card-3d:hover {
+            transform: rotateX(0deg) rotateZ(0deg) scale(1.1) translateZ(50px);
+            z-index: 100;
+            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.15);
+            border-color: #cbd5e1;
+        }
+
+        /* 右上角原语视图面板 - 可折叠修改 */
+        #primitive-overlay {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 320px;
+            max-height: 80vh; /* 展开时的最大高度 */
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e2e8f0;
+            z-index: 100;
+            display: none; 
+            flex-direction: column;
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); /* 平滑过渡动画 */
+        }
+
+        /* 收起状态的样式 */
+        #primitive-overlay.collapsed {
+            max-height: 52px; /* 仅显示标题栏的高度 */
+        }
+
+        .primitive-header {
+            padding: 14px 18px;
+            background: #f8fafc;
+            border-bottom: 1px solid #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between; /* 两端对齐 */
+            gap: 10px;
+            cursor: pointer; /* 鼠标变为手型 */
+            user-select: none;
+        }
+        .primitive-header:hover {
+            background: #f1f5f9;
+        }
+
+        /* 箭头旋转动画 */
+        #primitive-arrow {
+            transition: transform 0.3s ease;
+        }
+        #primitive-overlay.collapsed #primitive-arrow {
+            transform: rotate(-90deg); /* 收起时旋转箭头 */
+        }
+
+        .primitive-body {
+            padding: 20px;
+            overflow-y: auto;
+            /* 确保收起时内容不可见，防止tab聚焦等问题（虽然max-height已限制） */
+            opacity: 1;
+            transition: opacity 0.2s ease;
+        }
+        #primitive-overlay.collapsed .primitive-body {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* 原语时间轴样式 */
+        .primitive-timeline {
+            position: relative;
+            padding-left: 1rem;
+            border-left: 2px solid #eff6ff;
+        }
+
+        .primitive-step {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+        .primitive-step:last-child { margin-bottom: 0; }
+
+        .primitive-dot {
+            position: absolute;
+            left: -1.4rem;
+            top: 0.35rem;
+            width: 0.8rem;
+            height: 0.8rem;
+            border-radius: 50%;
+            background: white;
+            border: 2px solid #3b82f6;
+        }
+        /* 原语类型颜色 */
+        .p-type-summary .primitive-dot { border-color: #3b82f6; }
+        .p-type-theorem .primitive-dot { border-color: #f59e0b; }
+        .p-type-proof .primitive-dot { border-color: #8b5cf6; }
+
+        .primitive-label {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 0.4rem;
+            background: #eff6ff;
+            color: #3b82f6;
+            text-transform: uppercase;
+        }
+        .p-type-summary .primitive-label { background: #eff6ff; color: #3b82f6; }
+        .p-type-theorem .primitive-label { background: #fffbeb; color: #d97706; }
+        .p-type-proof .primitive-label { background: #f5f3ff; color: #7c3aed; }
+
+        .primitive-content {
+            font-size: 0.85rem;
+            color: #475569;
+            line-height: 1.6;
+        }
+
+        .connector { 
+            fill: none; 
+            stroke: #cbd5e1; 
+            stroke-width: 2; 
+            stroke-dasharray: 6, 4; 
+            opacity: 0.6; 
+        }
+
+        .gemini-input-bar { 
+            background: #f0f4f9; 
+            border-radius: 32px; 
+            transition: background 0.2s;
+        }
+        .gemini-input-bar:focus-within {
+            background: #e2e8f0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+
+        #resizer {
+            width: 6px;
+            background-color: transparent;
+            cursor: col-resize;
+            z-index: 50;
+            flex-shrink: 0;
+            border-left: 1px solid #e2e8f0;
+        }
+        #resizer:hover, #resizer.active { background-color: #3b82f6; }
+
+        .promote-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 8px;
+            padding: 4px 10px;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #3b82f6;
+            cursor: pointer;
+            width: 100%;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .promote-btn:hover { background: #eff6ff; border-color: #3b82f6; }
+        
+        .content-section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+            margin-top: 1.5rem;
+        }
+        .content-section-title:first-child { margin-top: 0; }
+        .content-section-bar {
+            width: 4px;
+            height: 1.25rem;
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body class="flex h-screen w-screen text-slate-900">
+
+    <main id="left-panel" class="min-w-[300px] flex flex-col bg-white z-10 shadow-xl" style="width: 40%;">
+        <header class="p-5 flex items-center gap-3 font-medium text-lg border-b bg-white/90 backdrop-blur sticky top-0 z-20">
+            <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg shadow-lg shadow-blue-200 flex items-center justify-center text-white">
+                <i data-lucide="network" class="w-5 h-5"></i>
+            </div>
+            <span class="tracking-tight text-slate-700">MindFlow AI</span>
+        </header>
+
+        <div id="chat-flow" class="flex-1 overflow-y-auto px-6 py-8 space-y-4">
+            <div id="welcome" class="py-12 text-center select-none">
+                <div class="inline-block p-4 rounded-full bg-blue-50 mb-6 animate-bounce">
+                    <i data-lucide="box" class="w-8 h-8 text-blue-500"></i>
+                </div>
+                <h1 class="text-4xl font-bold tracking-tight bg-gradient-to-br from-slate-800 to-slate-500 bg-clip-text text-transparent">知识图谱生成器</h1>
+                <p class="mt-4 text-slate-500">输入数学概念，实时构建 3D 逻辑关联。</p>
+            </div>
+        </div>
+
+        <div class="p-6 border-t bg-white">
+            <div class="gemini-input-bar flex items-center px-6 py-2">
+                <input id="user-input" type="text" placeholder="试着输入：什么是牛顿插值法" 
+                    class="flex-1 bg-transparent border-none outline-none text-base py-3 text-slate-700 placeholder:text-slate-400"
+                    onkeypress="if(event.keyCode==13) ask()">
+                <button onclick="ask()" class="text-blue-600 hover:bg-blue-100 rounded-full p-2 transition">
+                    <i data-lucide="send-horizontal" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <div id="resizer" title="拖动调整宽度"></div>
+
+    <aside id="viewport-3d" class="flex-1 relative">
+        <div id="primitive-overlay">
+            <div class="primitive-header" onclick="togglePrimitive()">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="list-tree" class="w-4 h-4 text-blue-600"></i>
+                    <span class="text-sm font-bold text-slate-700">逻辑原语索引</span>
+                </div>
+                <i id="primitive-arrow" data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+            </div>
+            <div id="primitive-content-area" class="primitive-body"></div>
+        </div>
+
+        <div id="canvas-3d">
+            <svg id="svg-layer" class="absolute inset-0 w-[8000px] h-[8000px] pointer-events-none overflow-visible"></svg>
+            <div id="cards-layer"></div>
+        </div>
+        
+        <div class="absolute bottom-6 right-6 bg-white/80 backdrop-blur p-3 rounded-lg shadow-sm border border-slate-200 text-xs text-slate-500 pointer-events-none select-none">
+            <div class="flex items-center gap-2 mb-1"><i data-lucide="mouse-pointer-2" class="w-3 h-3"></i> 拖拽平移</div>
+            <div class="flex items-center gap-2"><i data-lucide="zoom-in" class="w-3 h-3"></i> 滚轮缩放</div>
+        </div>
+    </aside>
+
+    <script>
+        lucide.createIcons();
+
+        function renderMath() {
+            if (window.renderMathInElement) {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false}
+                    ],
+                    throwOnError : false
+                });
+            }
+        }
+
+        const db = {
+            // 1. 牛顿插值法
+            "什么是牛顿插值法": { 
+                id: "n1", title: "牛顿插值法", x: 100, y: 150, parent: null, theme: "blue",
+                primitives: [
+                    { type: 'summary', label: '构造策略', content: '增量式构造：旧多项式 + 修正项。' },
+                    { type: 'theorem', label: '核心算子', content: '均差 (Divided Differences) 决定修正系数。', promoteQuery: '什么是差商' },
+                    { type: 'proof', label: '数学模型', content: '牛顿插值多项式的通用递归公式。' }
+                ],
+                body: `
+                <div class="space-y-6">
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-blue-600"></span>构造策略：增量式思维</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">牛顿法最核心的优势在于其<b>“增量式”</b>构造方案。想象一下，当你已经辛苦计算出了穿过前 $n$ 个点的多项式 $P_{n-1}(x)$，现在又来了一个新数据点 $(x_n, y_n)$。你肯定不想推倒重来。牛顿法允许你保留之前的成果，只需添加一个基于<b>均差</b>的“修正项”即可：$P_n(x) = P_{n-1}(x) + R_n(x)$。</p>
+                    </section>
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-blue-600"></span>核心算子：均差</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">这个“修正项”并非凭空产生，它的系数 $a_n$ 由 $n$ 阶<b>均差 (Divided Differences)</b> $f[x_0, \dots, x_n]$ 唯一确定。均差实质上提取了函数在这些离散点上的高阶变化率信息，反映了曲线在该局部的弯曲程度。</p>
+                    </section>
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-blue-600"></span>数学模型：递归公式</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">将上述思想数学化，我们就得到了牛顿插值的通用公式。请注意公式中的连乘部分 $\\prod_{i=0}^{k-1}(x-x_i)$，正是它保证了新加的项在所有旧节点处的值为 0，从而完美保留了之前的插值结果（这就是<b>承袭性</b>的数学保证）。</p>
+                        <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 my-2">
+                            $$P_n(x) = f[x_0] + \\sum_{k=1}^n f[x_0, \\dots, x_k]\\prod_{i=0}^{k-1}(x-x_i)$$
+                        </div>
+                    </section>
+                </div>`
+            },
+
+            // 2. 差商
+            "什么是差商": { 
+                id: "n2", title: "差商/均差原理", x: 100, y: 550, parent: "n1", deps: ["n1"], theme: "indigo",
+                primitives: [
+                    { type: 'summary', label: '物理定义', content: '导数的离散形式：描述变化率。' },
+                    { type: 'theorem', label: '重要性质', content: '轮换对称性：结果与节点顺序无关。' },
+                    { type: 'proof', label: '计算算法', content: '递归差商表：由低阶推导高阶。' }
+                ],
+                body: `
+                <div class="space-y-6">
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-indigo-600"></span>物理定义：离散导数</h4>
+                        <p class="text-slate-600 text-sm">均差（Divided Differences）不仅仅是一个中间计算量，它具有深刻的物理意义。一阶均差 $f[x_0, x_1]$ 几何上对应两点间割线的斜率（平均速度）；二阶均差则反映了斜率的变化快慢（平均加速度）。通过逐层计算均差，我们实际上是在剥离数据背后隐含的高阶导数信息。</p>
+                        <div class="bg-indigo-50 p-4 rounded-xl text-center border border-indigo-100 my-2">
+                            $$f[x_0, x_1] = \\frac{f(x_1) - f(x_0)}{x_1 - x_0}$$
+                        </div>
+                    </section>
+
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-indigo-600"></span>重要性质：轮换对称性</h4>
+                        <p class="text-slate-600 text-sm">均差具有一个极其优美的性质：<b>对称性</b>。即 $f[x_0, x_1, \dots, x_k]$ 的数值只取决于参与计算的节点集合 $\{x_0, \dots, x_k\}$，而完全不依赖于这些节点的排列顺序。这意味着，无论你以什么顺序处理数据点，最终计算出的最高阶均差（也就是牛顿多项式的最高次项系数）都是恒定不变的。</p>
+                    </section>
+
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-indigo-600"></span>计算算法：递归差商表</h4>
+                        <p class="text-slate-600 text-sm">在计算机实现中，我们通常构建一个<b>差商表（Difference Table）</b>。每一个高阶均差都是由它“左边”的两个低阶均差之差，除以跨度坐标之差得到的。这种递归结构使得 $O(n^2)$ 的动态规划算法成为可能。</p>
+                        <div class="bg-indigo-50 p-5 rounded-xl border border-indigo-100 my-2">
+                            <p class="font-bold text-indigo-800 mb-2 text-xs uppercase tracking-wide">递归通用公式</p>
+                            <div class="text-base text-center">
+                                $$f[x_0, \\dots, x_k] = \\frac{f[x_1, \\dots, x_k] - f[x_0, \\dots, x_{k-1}]}{x_k - x_0}$$
+                            </div>
+                        </div>
+                    </section>
+                </div>`
+            },
+
+            // 3. 拉格朗日插值法
+            "什么是拉格朗日插值法": {
+                id: "n3", title: "拉格朗日插值", x: 500, y: 150, parent: null, theme: "emerald",
+                primitives: [
+                    { type: 'summary', label: '核心思想', content: '基函数分解：每个点有专属开关。' },
+                    { type: 'theorem', label: '构造方法', content: '利用连乘积构造“归一化”基函数。', promoteQuery: '插值唯一性定理' },
+                    { type: 'proof', label: '数学验证', content: '验证 Kronecker delta 性质。' }
+                ],
+                body: `
+                <div class="space-y-6">
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-emerald-500"></span>核心思想：基函数分解</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">拉格朗日插值法展现了数学的<b>对称美</b>。它的核心直觉是“分而治之”：如果我们能为每一个数据点 $(x_i, y_i)$ 构造一个专属的“开关函数” $l_i(x)$，使得它仅在 $x_i$ 处等于 1（打开），而在其他所有采样点 $x_j$ 处都等于 0（关闭）。那么，最终的曲线只需要将这些开关函数按照高度 $y_i$ 进行线性叠加即可：$L(x) = \sum y_i l_i(x)$。</p>
+                    </section>
+
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-emerald-500"></span>构造方法：连乘积</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">如何制造这种“开关”？分子部分 $\\prod_{j\\neq i}(x-x_j)$ 包含了除 $x_i$ 外所有点的零点因子，确保了在其他点“熄灭”；分母部分 $\\prod_{j\\neq i}(x_i-x_j)$ 则是将 $x=x_i$ 代入分子后的值，用于做除法“归一化”，确保在 $x_i$ 点“亮度为1”。</p>
+                        <div class="bg-emerald-50 p-5 rounded-xl border border-emerald-100 my-2">
+                            <p class="font-bold text-emerald-800 mb-2 text-xs uppercase tracking-wide">拉格朗日基函数</p>
+                            <div class="text-sm mb-3">$$l_i(x) = \\prod_{j=0, j\\neq i}^{n} \\frac{x - x_j}{x_i - x_j}$$</div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-emerald-500"></span>数学验证：独立性</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">这种构造方法的精妙之处在于它满足 <b>Kronecker delta</b> 性质：$l_i(x_j) = \\delta_{ij}$。这意味着每一个基函数在插值过程中都是<b>相互独立</b>的，修改一个 $y_i$ 只会影响对应的这一项，而不会像牛顿法那样通过均差表波及全局系数（虽然重新计算基函数本身很麻烦）。</p>
+                    </section>
+                </div>`
+            },
+
+            // 4. 插值唯一性定理
+            "插值唯一性定理": {
+                id: "n_unique", title: "唯一性定理", x: 600, y: 350, parent: "n3", theme: "amber",
+                primitives: [
+                    { type: 'summary', label: '定理内容', content: 'N+1 个点唯一确定 N 次多项式。' },
+                    { type: 'proof', label: '证明思路', content: '假设不唯一，导出零点矛盾。' },
+                    { type: 'theorem', label: '深层意义', content: '牛顿法与拉格朗日法殊途同归。' }
+                ],
+                body: `
+                <div class="space-y-6">
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-amber-500"></span>定理内容：唯一存在</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">这是一个定心丸式的定理：在 $n+1$ 个互异节点上，满足插值条件的次数不超过 $n$ 的多项式是<b>唯一存在</b>的。这就像两点确定一条直线，三点确定一条抛物线一样，是代数的基本性质。</p>
+                    </section>
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-amber-500"></span>证明思路：反证法</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">我们可以假设存在两个不同的多项式 $P(x)$ 和 $Q(x)$ 都满足条件。那么它们的差函数 $R(x) = P(x) - Q(x)$ 也是一个不超过 $n$ 次的多项式。但是，这个差函数在 $n+1$ 个节点上都等于 0（因为两者的值相等）。一个 $n$ 次多项式怎么可能有 $n+1$ 个零点呢？除非它恒等于零。所以 $P(x) \equiv Q(x)$。</p>
+                    </section>
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-amber-500"></span>深层意义：殊途同归</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm">这个定理告诉我们，无论你是用拉格朗日基函数拼凑，还是用牛顿均差递推，或者是解范德蒙方程组，最终得到的数学对象是<b>完全同一个</b>。它们只是同一个真理在不同基底下的投影。</p>
+                    </section>
+                </div>`
+            },
+
+            // 5. 插值算法总结
+            "插值算法总结": {
+                id: "n4", title: "核心算法对比", x: 300, y: 650, parent: "n3",
+                deps: ["n1", "n3"], 
+                theme: "violet",
+                primitives: [
+                    { type: 'summary', label: '计算效率', content: '牛顿法 (O(n)) 优于 拉格朗日 (O(n²))。' },
+                    { type: 'theorem', label: '数值风险', content: '龙格现象：高阶震荡风险。' },
+                    { type: 'summary', label: '工程建议', content: '推导用拉格朗日，计算用牛顿。' }
+                ],
+                body: `
+                <div class="space-y-5">
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-violet-600"></span>计算效率对比</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm mb-4">在增加新节点时，<b>牛顿法</b>只需要计算新的一行均差，复杂度为 $O(n)$，非常高效。而<b>拉格朗日法</b>由于所有基函数都包含 $(x-x_j)$ 因子，增加一个点导致所有旧基函数都需要重写，复杂度高达 $O(n^2)$。因此，在计算机程序中，牛顿法是绝对的主流。</p>
+                    </section>
+
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-violet-600"></span>数值风险：龙格现象</h4>
+                        <p class="leading-relaxed text-slate-600 text-sm mb-4">“多项式次数越高越好”是一个直觉误区。<b>龙格现象 (Runge's Phenomenon)</b> 告诉我们，在使用高阶多项式（通常 n > 7）对等距节点进行插值时，区间边缘会出现剧烈的震荡，导致结果完全不可用。这就是为什么现代工程更倾向于使用<b>分段低阶插值（如三次样条 Splines）</b>的原因。</p>
+                    </section>
+
+                    <section>
+                        <h4 class="content-section-title"><span class="content-section-bar bg-violet-600"></span>工程选型建议</h4>
+                        <div class="overflow-hidden border border-slate-200 rounded-xl shadow-sm mt-2">
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-slate-100 text-slate-700 font-bold uppercase text-xs">
+                                    <tr>
+                                        <th class="px-4 py-3">特性维度</th>
+                                        <th class="px-4 py-3">拉格朗日法 (Lagrange)</th>
+                                        <th class="px-4 py-3 text-blue-700">牛顿法 (Newton)</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    <tr class="bg-white">
+                                        <td class="px-4 py-3 font-medium text-slate-900">核心思想</td>
+                                        <td class="px-4 py-3 text-slate-500">基函数加权 (全域平权)</td>
+                                        <td class="px-4 py-3 text-slate-500">均差递推 (逻辑继承)</td>
+                                    </tr>
+                                    <tr class="bg-slate-50">
+                                        <td class="px-4 py-3 font-medium text-slate-900">增加节点</td>
+                                        <td class="px-4 py-3 text-red-500 font-medium">需全部重算 (高成本)</td>
+                                        <td class="px-4 py-3 text-green-600 font-bold">仅算新增项 (低成本)</td>
+                                    </tr>
+                                    <tr class="bg-white">
+                                        <td class="px-4 py-3 font-medium text-slate-900">编程实现</td>
+                                        <td class="px-4 py-3 text-slate-500">二重循环 (直观但慢)</td>
+                                        <td class="px-4 py-3 text-slate-500">均差表 + 秦九韶算法</td>
+                                    </tr>
+                                    <tr class="bg-slate-50">
+                                        <td class="px-4 py-3 font-medium text-slate-900">主要用途</td>
+                                        <td class="px-4 py-3 text-slate-500">理论分析、数值积分</td>
+                                        <td class="px-4 py-3 text-slate-500">程序实现、动态拟合</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>`
+            }
+        };
+
+        const canvas = document.getElementById('canvas-3d');
+        const viewport = document.getElementById('viewport-3d');
+        const cardsLayer = document.getElementById('cards-layer');
+        const svgLayer = document.getElementById('svg-layer');
+        const chatFlow = document.getElementById('chat-flow');
+        const userInput = document.getElementById('user-input');
+        const resizer = document.getElementById('resizer');
+        const leftPanel = document.getElementById('left-panel');
+
+        let scale = 1, pointX = 0, pointY = 0, isDragging = false, startX = 0, startY = 0;
+        let explored = {};
+        
+        // 全局滚动监听器 (用于切换原语面板)
+        let globalObserver = null;
+
+        // 初始化位置
+        setTransform(viewport.offsetWidth / 2 - 300, viewport.offsetHeight / 2 - 200, 1);
+
+        function setTransform(x, y, s) {
+            canvas.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+            pointX = x; pointY = y; scale = s;
+        }
+
+        // 画布交互 (缩放/平移)
+        viewport.addEventListener('wheel', e => {
+            e.preventDefault();
+            const rect = viewport.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            let newScale = Math.min(Math.max(0.2, scale * delta), 4);
+            const newX = mouseX - (mouseX - pointX) * (newScale / scale);
+            const newY = mouseY - (mouseY - pointY) * (newScale / scale);
+            setTransform(newX, newY, newScale);
+        }, { passive: false });
+
+        viewport.addEventListener('mousedown', e => {
+            if (e.target.closest('.card-3d')) return;
+            isDragging = true;
+            startX = e.clientX - pointX; startY = e.clientY - pointY;
+            viewport.classList.add('grabbing');
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            setTransform(e.clientX - startX, e.clientY - startY, scale);
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false; viewport.classList.remove('grabbing');
+        });
+
+        // 拖动条
+        resizer.addEventListener('mousedown', e => {
+            document.body.classList.add('resizing');
+            resizer.classList.add('active');
+            const onMove = ev => {
+                let w = Math.min(Math.max(ev.clientX, 300), window.innerWidth - 300);
+                leftPanel.style.width = w + 'px';
+                leftPanel.style.flex = 'none';
+            };
+            const onUp = () => {
+                document.body.classList.remove('resizing');
+                resizer.classList.remove('active');
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        });
+
+        // 原语视图切换折叠
+        function togglePrimitive() {
+            const overlay = document.getElementById('primitive-overlay');
+            overlay.classList.toggle('collapsed');
+        }
+
+        // 原语视图更新逻辑
+        function updatePrimitiveOverlay(node) {
+            const container = document.getElementById('primitive-overlay');
+            const contentArea = document.getElementById('primitive-content-area');
+            
+            if (!node || !node.primitives || node.primitives.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            let html = `<div class="primitive-timeline">`;
+            node.primitives.forEach(p => {
+                let action = p.promoteQuery ? `<button class="promote-btn" onclick="promoteTask('${p.promoteQuery}')"><i data-lucide="corner-down-right" class="w-3 h-3"></i><span>升格子任务</span></button>` : '';
+                const typeClass = `p-type-${p.type || 'default'}`;
+                html += `
+                    <div class="primitive-step ${typeClass}">
+                        <div class="primitive-dot"></div>
+                        <div class="primitive-label">${p.label}</div>
+                        <div class="primitive-content">${p.content}</div>
+                        ${action}
+                    </div>`;
+            });
+            html += `</div>`;
+            
+            contentArea.innerHTML = html;
+            container.style.display = 'flex';
+            lucide.createIcons();
+            renderMath();
+        }
+        
+        // 全局滚动监听：当某个消息块进入视野时，切换右侧原语视图
+        function initGlobalScrollSpy() {
+            if (globalObserver) return; // 避免重复初始化
+
+            const options = {
+                root: document.getElementById('chat-flow'),
+                // 修改触发区域：改为屏幕中间的一条线 (或者中间的一小块区域)
+                // top: -50%, bottom: -50% 意味着只有经过正中间的内容才会被捕获
+                // 这样只有当一个块真正占据屏幕核心位置（超过一半视感）时才会切换
+                rootMargin: '-45% 0px -45% 0px', 
+                threshold: 0
+            };
+
+            globalObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const nodeId = entry.target.getAttribute('data-node-id');
+                        if (nodeId && explored[nodeId]) {
+                            // 切换原语视图数据源
+                            updatePrimitiveOverlay(explored[nodeId]);
+                        }
+                    }
+                });
+            }, options);
+        }
+
+        function promoteTask(query) { userInput.value = query; ask(); }
+
+        function triggerJump(id) {
+            const target = document.getElementById(`block-${id}`);
+            if (target) {
+                // 关键修改：block: 'start' 确保跳转到顶部
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                target.classList.add('active-link-pulse');
+                setTimeout(() => target.classList.remove('active-link-pulse'), 2000);
+            }
+        }
+
+        function focusNode(node) {
+            const rect = viewport.getBoundingClientRect();
+            const targetX = (rect.width / 2) - (node.x + 110) * scale;
+            const targetY = (rect.height / 2) - (node.y + 60) * scale;
+            canvas.style.transition = "transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)";
+            setTransform(targetX, targetY, scale);
+            setTimeout(() => canvas.style.transition = "", 600);
+        }
+
+        function renderNodeVisuals(node) {
+            explored[node.id] = node;
+            if(document.getElementById('welcome')) document.getElementById('welcome').remove();
+
+            // 生成 HTML 时，添加 data-node-id 供 ScrollSpy 使用
+            const msgHtml = `
+                <div id="block-${node.id}" class="msg-block" data-node-id="${node.id}">
+                    <div class="flex gap-4 mb-3 items-center">
+                        <span class="text-[10px] font-bold text-slate-300 tracking-widest uppercase">Context</span>
+                        <div class="h-[1px] flex-1 bg-slate-100"></div>
+                    </div>
+                    <div class="text-xl font-bold mb-4 text-slate-800">${node.title}</div>
+                    <div class="flex gap-4">
+                        <div class="w-8 h-8 rounded-full bg-${node.theme || 'blue'}-50 flex-shrink-0 flex items-center justify-center text-${node.theme || 'blue'}-600 border border-${node.theme || 'blue'}-100">
+                            <i data-lucide="sparkles" class="w-4 h-4"></i>
+                        </div>
+                        <div class="flex-1 text-slate-600 text-sm leading-relaxed">${node.body}</div>
+                    </div>
+                </div>`;
+            chatFlow.insertAdjacentHTML('beforeend', msgHtml);
+            
+            // 立即开始监听新加入的块
+            initGlobalScrollSpy();
+            const newBlock = document.getElementById(`block-${node.id}`);
+            if (newBlock) globalObserver.observe(newBlock);
+            
+            const card = document.createElement('div');
+            card.className = 'card-3d';
+            card.style.left = node.x + 'px'; card.style.top = node.y + 'px';
+            const themeColor = { blue: '#3b82f6', indigo: '#6366f1', emerald: '#10b981', violet: '#8b5cf6', amber: '#f59e0b' }[node.theme || 'blue'];
+            card.style.borderBottom = `3px solid ${themeColor}`;
+            card.onclick = e => { e.stopPropagation(); triggerJump(node.id); focusNode(node); };
+            card.innerHTML = `<div class="flex items-center gap-2 mb-1"><div class="w-2 h-2 rounded-full" style="background:${themeColor}"></div><h3 class="text-slate-800 font-bold text-sm">${node.title}</h3></div><p class="text-[10px] text-slate-400">点击聚焦</p>`;
+            cardsLayer.appendChild(card);
+
+            const parents = new Set();
+            if (node.parent) parents.add(node.parent);
+            if (node.deps) node.deps.forEach(d => parents.add(d));
+
+            parents.forEach(pid => {
+                if (explored[pid]) {
+                    const p = explored[pid];
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    const sx = p.x + 110, sy = p.y + 60, ex = node.x + 110, ey = node.y;
+                    line.setAttribute("d", `M ${sx} ${sy} C ${sx} ${sy + 100}, ${ex} ${ey - 100}, ${ex} ${ey}`);
+                    line.setAttribute("class", "connector");
+                    svgLayer.appendChild(line);
+                }
+            });
+            updatePrimitiveOverlay(node);
+        }
+
+        function ask() {
+            const q = userInput.value.trim();
+            let key = Object.keys(db).find(k => k === q || k.includes(q)) || Object.keys(db).find(k => q.includes(k.replace('什么是','')));
+            if (!key || !db[key]) return;
+
+            const target = db[key];
+            if (explored[target.id]) {
+                triggerJump(target.id); focusNode(target);
+            } else {
+                (target.deps || []).forEach(did => {
+                    const dnode = Object.values(db).find(n => n.id === did);
+                    if (dnode && !explored[did]) renderNodeVisuals(dnode);
+                });
+                renderNodeVisuals(target);
+                focusNode(target);
+            }
+
+            renderMath(); lucide.createIcons();
+            setTimeout(() => chatFlow.scrollTop = chatFlow.scrollHeight, 100);
+            userInput.value = '';
+
+            if (key.includes("牛顿")) {
+                userInput.placeholder = "试着输入：什么是拉格朗日插值法";
+            } else if (key.includes("拉格朗日")) {
+                userInput.placeholder = "试着输入：插值算法总结";
+            } else if (key.includes("总结")) {
+                userInput.placeholder = "输入任意数学概念...";
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", renderMath);
+    </script>
+</body>
+</html>

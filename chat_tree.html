@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>chattree - 对话树</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+        body { 
+            font-family: 'Google Sans', system-ui, sans-serif; 
+            background-color: #fff; 
+            overflow: hidden; 
+        }
+        /* 左侧聊天流区域 */
+        #chat-flow { scroll-behavior: smooth; }
+        .msg-block {
+            position: relative;
+            padding: 32px;
+            border-left: 4px solid transparent;
+            transition: all 0.5s ease;
+            scroll-margin-top: 20px; 
+        }
+        .active-link-pulse {
+            border-left-color: #3b82f6 !important;
+            background-color: rgba(59, 130, 246, 0.03);
+        }
+        .active-link-pulse::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 10% center, rgba(59, 130, 246, 0.12) 0%, transparent 70%);
+            animation: ultra-glow 2s ease-out forwards;
+            pointer-events: none;
+        }
+        @keyframes ultra-glow {
+            0% { opacity: 0; }
+            20% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        #chatmap-panel { background: #f8fafd; overflow: visible; }
+        #chatmap-tree { transform-origin: 0 0; cursor: grab; }
+        #chatmap-tree.grabbing { cursor: grabbing; }
+        #resizer {
+            width: 6px;
+            background-color: transparent;
+            cursor: col-resize;
+            z-index: 50;
+            flex-shrink: 0;
+            border-left: 1px solid #e2e8f0;
+        }
+        #resizer:hover, #resizer.active { background-color: #3b82f6; }
+    </style>
+</head>
+<body class="flex h-screen w-screen text-slate-900">
+
+    <main id="left-panel" class="min-w-[320px] flex flex-col bg-white z-10 shadow-xl" style="width: 40%;">
+        <header class="p-5 flex items-center justify-between gap-3 font-medium text-lg border-b bg-white/90 backdrop-blur sticky top-0 z-20">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg shadow-lg shadow-blue-200 flex items-center justify-center text-white">
+                    <i data-lucide="message-square-dots" class="w-5 h-5"></i>
+                </div>
+                <span class="tracking-tight text-slate-700">chattree</span>
+            </div>
+            <button onclick="createNewConversation()" class="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full transition whitespace-nowrap">
+                <i data-lucide="plus" class="w-4 h-4 inline mr-1"></i>新对话
+            </button>
+        </header>
+
+        <div id="chat-flow" class="flex-1 overflow-y-auto px-6 py-8 space-y-4">
+            <div id="welcome" class="py-12 text-center select-none">
+                <div class="inline-block p-4 rounded-full bg-blue-50 mb-6 animate-bounce">
+                    <i data-lucide="bot" class="w-8 h-8 text-blue-500"></i>
+                </div>
+                <h1 class="text-4xl font-bold tracking-tight bg-gradient-to-br from-slate-800 to-slate-500 bg-clip-text text-transparent">欢迎使用 chattree</h1>
+                <p class="mt-4 text-slate-500">你可以随时提问，右侧将自动生成对话树。</p>
+            </div>
+        </div>
+
+        <div class="p-6 border-t bg-white">
+            <div class="gemini-input-bar flex items-center px-6 py-2">
+                <input id="user-input" type="text" placeholder="请输入你的问题..." 
+                    class="flex-1 bg-transparent border-none outline-none text-base py-3 text-slate-700 placeholder:text-slate-400"
+                    onkeypress="if(event.keyCode==13) sendChat()">
+                <button onclick="sendChat()" class="text-blue-600 hover:bg-blue-100 rounded-full p-2 flex items-center gap-1 transition">
+                    <i data-lucide="send-horizontal" class="w-5 h-5"></i>
+                    <span class="text-sm">发送</span>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <div id="resizer" title="拖动调整宽度"></div>
+
+    <aside id="chatmap-panel" class="flex-1 relative">
+        <header class="absolute top-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-white/80 px-4 py-2 rounded-xl shadow border border-slate-100">
+            <i data-lucide="git-branch" class="w-4 h-4 text-blue-600"></i>
+            <span class="font-bold text-slate-700 text-sm tracking-wide">对话树</span>
+        </header>
+        <div id="chatmap-tree" class="flex flex-col items-center pt-24 pb-12 min-h-full relative">
+            <!-- 节点与连线将动态插入此处 -->
+        </div>
+        <div class="absolute bottom-6 right-6 bg-white/80 backdrop-blur p-3 rounded-lg shadow-sm border border-slate-200 text-xs text-slate-500 pointer-events-none select-none">
+            <div class="flex items-center gap-2 mb-1"><i data-lucide="mouse-pointer-2" class="w-3 h-3"></i> 拖拽/缩放（开发中）</div>
+            <div class="flex items-center gap-2"><i data-lucide="focus" class="w-3 h-3"></i> 点击节点聚焦</div>
+        </div>
+    </aside>
+
+    <script>
+        lucide.createIcons();
+
+        function renderMath() {
+            if (window.renderMathInElement) {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false}
+                    ],
+                    throwOnError : false
+                });
+            }
+        }
+
+        // map interaction state
+        let mapScale = 1, mapX = 0, mapY = 0;
+        let mapDragging = false, mapStartX = 0, mapStartY = 0;
+
+        function setMapTransform(x, y, s) {
+            const map = document.getElementById('chatmap-tree');
+            map.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+            mapX = x; mapY = y; mapScale = s;
+        }
+
+        function initMapInteraction() {
+            const panel = document.getElementById('chatmap-panel');
+            const map = document.getElementById('chatmap-tree');
+            // pan/zoom
+            panel.addEventListener('mousedown', e => {
+                // ignore if clicking on node
+                if (e.target.closest('.map-node')) return;
+                mapDragging = true;
+                mapStartX = e.clientX - mapX;
+                mapStartY = e.clientY - mapY;
+                map.classList.add('grabbing');
+            });
+            window.addEventListener('mousemove', e => {
+                if (!mapDragging) return;
+                setMapTransform(e.clientX - mapStartX, e.clientY - mapStartY, mapScale);
+            });
+            window.addEventListener('mouseup', () => {
+                mapDragging = false;
+                map.classList.remove('grabbing');
+            });
+            panel.addEventListener('wheel', e => {
+                e.preventDefault();
+                const rect = panel.getBoundingClientRect();
+                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                let ns = Math.min(Math.max(0.2, mapScale * delta), 4);
+                const nx = mx - (mx - mapX) * (ns / mapScale);
+                const ny = my - (my - mapY) * (ns / mapScale);
+                setMapTransform(nx, ny, ns);
+            }, { passive: false });
+        }
+
+        let chatNodes = [];
+        let nodeIdSeed = 1;
+        let currentFocusId = null;
+        let newSession = false; // when true, left panel shows placeholder and first send creates root node
+
+
+        const DEEPSEEK_API_KEY = 'sk-569b424a96fd4804bc079dd4cbbce1ab';
+
+        async function queryDeepseek(question) {
+            // call Deepseek chat completion endpoint similar to curl example
+            const url = 'https://api.deepseek.com/chat/completions';
+            const payload = {
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: 'You are a helpful assistant.' },
+                    { role: 'user', content: question }
+                ],
+                stream: false
+            };
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (data.choices && data.choices[0] && data.choices[0].message) {
+                return data.choices[0].message.content;
+            }
+            return '';
+        }
+
+        function createChatNode({question, answer, parentId=null}) {
+            // determine default position
+            let x = 100, y = 100;
+            if (parentId) {
+                const parent = chatNodes.find(n => n.id === parentId);
+                if (parent) {
+                    // place under parent, offset by existing children
+                    const siblings = parent.children.length;
+                    x = parent.x + siblings * 150;
+                    y = parent.y + 120;
+                }
+            } else {
+                // root new node offset by count
+                x += chatNodes.filter(n => !n.parentId).length * 150;
+                y = 100;
+            }
+            const node = {id: 'node_' + (nodeIdSeed++), parentId, question, answer, children: [], x, y};
+            if (parentId) {
+                const parent = chatNodes.find(n => n.id === parentId);
+                if (parent) parent.children.push(node.id);
+            }
+            chatNodes.push(node);
+            return node;
+        }
+
+        function renderChatMap() {
+            const tree = document.getElementById('chatmap-tree');
+            tree.innerHTML = '<svg id="map-svg" class="absolute" style="left:0;top:0" ></svg>';
+            chatNodes.forEach(n => {
+                const nd = document.createElement('div');
+                nd.className = 'map-node bg-white rounded-xl shadow border border-slate-200 px-5 py-3 flex flex-col items-center cursor-pointer transition hover:scale-105 hover:shadow-lg relative';
+                if (currentFocusId===n.id) nd.classList.add('ring-2','ring-blue-400','scale-105');
+                nd.style.position = 'absolute';
+                nd.style.left = n.x + 'px';
+                nd.style.top = n.y + 'px';
+                nd.setAttribute('data-id', n.id);
+                nd.innerHTML = '<div class="font-bold text-slate-700 text-base mb-1">'+n.question+'</div>' +
+                               '<div class="text-xs text-slate-400">'+(n.answer ? '已回复' : '等待回复')+'</div>' +
+                               '<button class="del-btn text-xs text-slate-400 hover:text-red-500 mt-1 leading-none" onclick="event.stopPropagation(); confirmDelete(\''+n.id+'\'); return false;">删除</button>';
+                nd.onmousedown = nodeMouseDown;
+                nd.onclick = () => selectNode(n.id);
+                tree.appendChild(nd);
+            });
+            updateEdges();
+        }
+
+        function confirmDelete(id) {
+            if (window.confirm('确定要删除该节点吗？此操作会移除该节点，但不会删除其子节点关系（子节点将变为无父节点）。')) {
+                deleteNode(id);
+            }
+        }
+
+        function selectNode(id) {
+            currentFocusId = id;
+            renderChatMap();
+            renderChatFlow();
+            // 不进行画布居中/缩放操作（仅切换选择）
+        }
+
+        function deleteNode(id) {
+            const node = chatNodes.find(n => n.id === id);
+            if (!node) return;
+            // remove from parent
+            if (node.parentId) {
+                const parent = chatNodes.find(n => n.id === node.parentId);
+                if (parent) {
+                    parent.children = parent.children.filter(cid => cid !== id);
+                }
+            }
+            // remove all children relationship
+            node.children = [];
+            // remove node
+            chatNodes = chatNodes.filter(n => n.id !== id);
+            // clear focus if focusing this node
+            if (currentFocusId === id) {
+                currentFocusId = null;
+            }
+            renderChatMap();
+            renderChatFlow();
+        }
+
+        function createNewConversation() {
+            // leave existing nodes intact, simply clear focus and show placeholder
+            currentFocusId = null;
+            newSession = true;
+            renderChatMap();
+            renderChatFlow();
+        }
+
+        
+
+        // dragging individual nodes
+        let draggingNode = null, dragOffsetX=0, dragOffsetY=0;
+        function nodeMouseDown(e) {
+            e.stopPropagation();
+            draggingNode = e.currentTarget;
+            dragOffsetX = e.clientX - parseFloat(draggingNode.style.left);
+            dragOffsetY = e.clientY - parseFloat(draggingNode.style.top);
+            window.addEventListener('mousemove', nodeMouseMove);
+            window.addEventListener('mouseup', nodeMouseUp);
+        }
+        function nodeMouseMove(e) {
+            if(!draggingNode) return;
+            const id = draggingNode.getAttribute('data-id');
+            const nodeObj = chatNodes.find(n=>n.id===id);
+            nodeObj.x = e.clientX - dragOffsetX;
+            nodeObj.y = e.clientY - dragOffsetY;
+            draggingNode.style.left = nodeObj.x + 'px';
+            draggingNode.style.top = nodeObj.y + 'px';
+            updateEdges();
+        }
+        function nodeMouseUp(e) {
+            draggingNode = null;
+            window.removeEventListener('mousemove', nodeMouseMove);
+            window.removeEventListener('mouseup', nodeMouseUp);
+        }
+
+        function focusChatNode(id) {
+            currentFocusId = id;
+            renderChatMap();
+            renderChatFlow();
+            // center node on map
+            const map = document.getElementById('chatmap-tree');
+            const nodeEl = map.querySelector("[onclick*='"+id+"']");
+            if (nodeEl) {
+                const rect = nodeEl.getBoundingClientRect();
+                const parentRect = map.parentElement.getBoundingClientRect();
+                const offsetX = (parentRect.width/2) - (rect.left + rect.width/2 - parentRect.left);
+                const offsetY = (parentRect.height/2) - (rect.top + rect.height/2 - parentRect.top);
+                setMapTransform(mapX + offsetX, mapY + offsetY, mapScale);
+            }
+        }
+
+        function renderChatFlow() {
+            const flow = document.getElementById('chat-flow');
+            flow.innerHTML = '';
+            if (!currentFocusId) {
+                if (newSession) {
+                    flow.innerHTML = '<div class="py-12 text-center text-slate-400 italic">当前可以在新对话中发起提问</div>';
+                } else {
+                    flow.innerHTML = document.getElementById('welcome') ? document.getElementById('welcome').outerHTML : '';
+                }
+                return;
+            }
+            let node = chatNodes.find(n => n.id === currentFocusId);
+            const history = [];
+            while (node) {
+                history.push(node);
+                node = node.parentId ? chatNodes.find(n => n.id === node.parentId) : null;
+            }
+            history.reverse();
+            history.forEach(n => {
+                const isFocus = (n.id === currentFocusId);
+                const block = document.createElement('div');
+                block.className = 'msg-block rounded-xl border bg-white/90 shadow transition mb-6' +
+                    (isFocus?' ring-2 ring-blue-400 scale-105':'');
+                block.setAttribute('data-node-id', n.id);
+                block.onclick = () => selectNode(n.id);
+                block.innerHTML = '<div class="flex gap-2 items-center mb-2">' +
+                    '<span class="text-xs font-bold text-slate-400">'+(n.parentId ? '历史' : '起点')+'</span>' +
+                    '<div class="h-[1px] flex-1 bg-gradient-to-r from-blue-100 to-slate-100"></div>' +
+                    (isFocus ? '<span class="text-xs text-blue-500 font-bold animate-pulse">当前</span>' : '') +
+                '</div>' +
+                '<div class="font-bold text-slate-800 mb-2 text-lg">Q: '+n.question+'</div>' +
+                '<div class="text-slate-600 text-base leading-relaxed">A: '+(n.answer || '<span class="text-slate-300">（暂无回复）</span>')+'</div>';
+                flow.appendChild(block);
+            });
+        }
+
+        function updateEdges() {
+            const svg = document.getElementById('map-svg');
+            if (!svg) return;
+            svg.innerHTML = '';
+            // compute bounding box of all nodes
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            chatNodes.forEach(n => {
+                const el = document.querySelector(`[data-id="${n.id}"]`);
+                if (el) {
+                    const w = el.offsetWidth, h = el.offsetHeight;
+                    minX = Math.min(minX, n.x);
+                    minY = Math.min(minY, n.y);
+                    maxX = Math.max(maxX, n.x + w);
+                    maxY = Math.max(maxY, n.y + h);
+                } else {
+                    minX = Math.min(minX, n.x);
+                    minY = Math.min(minY, n.y);
+                    maxX = Math.max(maxX, n.x + 150);
+                    maxY = Math.max(maxY, n.y + 80);
+                }
+            });
+            if (minX === Infinity) {
+                minX = 0; minY = 0; maxX = 1000; maxY = 800;
+            }
+            const pad = 200;
+            const svgLeft = minX - pad;
+            const svgTop = minY - pad;
+            svg.style.left = svgLeft + 'px';
+            svg.style.top = svgTop + 'px';
+            const sw = Math.max(800, (maxX - minX) + pad * 2);
+            const sh = Math.max(600, (maxY - minY) + pad * 2);
+            svg.setAttribute('width', sw);
+            svg.setAttribute('height', sh);
+            svg.style.overflow = 'visible';
+
+            chatNodes.forEach(n => {
+                n.children.forEach(cid => {
+                    const child = chatNodes.find(c => c.id===cid);
+                    if (child) {
+                        const parentEl = document.querySelector(`[data-id="${n.id}"]`);
+                        const childEl = document.querySelector(`[data-id="${cid}"]`);
+                        let sx = n.x + 75, sy = n.y + 60;
+                        let ex = child.x + 75, ey = child.y;
+                        if(parentEl) {
+                            sx = n.x + parentEl.offsetWidth/2;
+                            sy = n.y + parentEl.offsetHeight;
+                        }
+                        if(childEl) {
+                            ex = child.x + childEl.offsetWidth/2;
+                            ey = child.y;
+                        }
+                        // convert to svg local coordinates
+                        const lsx = sx - svgLeft;
+                        const lsy = sy - svgTop;
+                        const lex = ex - svgLeft;
+                        const ley = ey - svgTop;
+                        const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+                        const mx = lsx, my = (lsy+ley)/2;
+                        path.setAttribute('d', `M${lsx},${lsy} C${lsx},${my} ${lex},${my} ${lex},${ley}`);
+                        path.setAttribute('stroke','#3b82f6');
+                        path.setAttribute('fill','none');
+                        path.setAttribute('stroke-width','2');
+                        path.setAttribute('stroke-dasharray', '0');
+                        svg.appendChild(path);
+                    }
+                });
+            });
+        }
+
+        async function sendChat() {
+            const input = document.getElementById('user-input');
+            const q = input.value.trim();
+            if (!q) return;
+            // call deepseek API for answer
+            let a = '';
+            try {
+                a = await queryDeepseek(q);
+            } catch (err) {
+                console.error('Deepseek API error', err);
+                a = '（API调用失败）';
+            }
+            let parentId = currentFocusId;
+            const node = createChatNode({question: q, answer: a, parentId});
+            renderChatMap();
+            currentFocusId = node.id;
+            renderChatFlow();
+            input.value = '';
+            focusChatNode(node.id);
+            newSession = false; // once first question sent, clear placeholder state
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderChatMap();
+            renderChatFlow();
+            initMapInteraction();
+        });
+    </script>
+</body>
+</html>

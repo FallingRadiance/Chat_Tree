@@ -178,8 +178,8 @@
 
         const DEEPSEEK_API_KEY = 'sk-569b424a96fd4804bc079dd4cbbce1ab';
 
-        async function queryDeepseek(question) {
-            // call Deepseek chat completion endpoint similar to curl example
+        // streaming version of query using Fetch readable stream, parsing SSE data lines
+        async function queryDeepseek(question, onUpdate) {
             const url = 'https://api.deepseek.com/chat/completions';
             const payload = {
                 model: 'deepseek-chat',
@@ -187,7 +187,7 @@
                     { role: 'system', content: 'You are a helpful assistant.' },
                     { role: 'user', content: question }
                 ],
-                stream: false
+                stream: true
             };
             const resp = await fetch(url, {
                 method: 'POST',
@@ -197,11 +197,42 @@
                 },
                 body: JSON.stringify(payload)
             });
-            const data = await resp.json();
-            if (data.choices && data.choices[0] && data.choices[0].message) {
-                return data.choices[0].message.content;
+            if (!resp.ok) {
+                throw new Error('Network response was not ok');
             }
-            return '';
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let result = '';
+            let buffer = '';
+            let finished = false;
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split(/\r?\n/);
+                buffer = lines.pop(); // preserve last partial line
+                for (let line of lines) {
+                    if (!line.startsWith('data:')) continue;
+                    const payload = line.slice(5).trim();
+                    if (payload === '[DONE]') {
+                        finished = true;
+                        break;
+                    }
+                    try {
+                        const data = JSON.parse(payload);
+                        const delta = data.choices && data.choices[0] && data.choices[0].delta;
+                        if (delta) {
+                            const text = delta.content || '';
+                            result += text;
+                            if (onUpdate && text) onUpdate(text);
+                        }
+                    } catch (e) {
+                        // ignore malformed JSON
+                    }
+                }
+                if (finished) break;
+            }
+            return result;
         }
 
         function createChatNode({question, answer, parentId=null}) {
@@ -240,8 +271,9 @@
                 nd.style.left = n.x + 'px';
                 nd.style.top = n.y + 'px';
                 nd.setAttribute('data-id', n.id);
+                let statusText = n.pending ? '回复中...' : (n.answer ? '已回复' : '等待回复');
                 nd.innerHTML = '<div class="font-bold text-slate-700 text-base mb-1">'+n.question+'</div>' +
-                               '<div class="text-xs text-slate-400">'+(n.answer ? '已回复' : '等待回复')+'</div>' +
+                               '<div class="text-xs text-slate-400">'+statusText+'</div>' +
                                '<button class="del-btn text-xs text-slate-400 hover:text-red-500 mt-1 leading-none" onclick="event.stopPropagation(); confirmDelete(\''+n.id+'\'); return false;">删除</button>';
                 nd.onmousedown = nodeMouseDown;
                 nd.onclick = () => selectNode(n.id);
@@ -446,22 +478,31 @@
             const input = document.getElementById('user-input');
             const q = input.value.trim();
             if (!q) return;
-            // call deepseek API for answer
-            let a = '';
-            try {
-                a = await queryDeepseek(q);
-            } catch (err) {
-                console.error('Deepseek API error', err);
-                a = '（API调用失败）';
-            }
             let parentId = currentFocusId;
-            const node = createChatNode({question: q, answer: a, parentId});
+            const node = createChatNode({question: q, answer: '', parentId});
+            node.pending = true;
             renderChatMap();
             currentFocusId = node.id;
             renderChatFlow();
             input.value = '';
             focusChatNode(node.id);
-            newSession = false; // once first question sent, clear placeholder state
+            newSession = false;
+            // stream answer
+            try {
+                await queryDeepseek(q, chunk => {
+                    node.answer += chunk;
+                    renderChatMap();
+                    renderChatFlow();
+                }).then(final => {
+                    node.answer = final;
+                });
+            } catch (err) {
+                console.error('Deepseek API error', err);
+                node.answer = '（API调用失败）';
+            }
+            node.pending = false;
+            renderChatMap();
+            renderChatFlow();
         }
 
         document.addEventListener('DOMContentLoaded', () => {

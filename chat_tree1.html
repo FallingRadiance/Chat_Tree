@@ -175,8 +175,8 @@
         let currentFocusId = null;
         let newSession = false; // when true, left panel shows placeholder and first send creates root node
 
-
-        const DEEPSEEK_API_KEY = 'sk-569b424a96fd4804bc079dd4cbbce1ab';
+        // please use your deepseek_api_key
+        const DEEPSEEK_API_KEY = 'YOUR_API_KEY';
 
         // streaming version of query using Fetch readable stream, parsing SSE data lines
         async function queryDeepseek(messages, onUpdate) {

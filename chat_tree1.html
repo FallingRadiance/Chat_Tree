@@ -108,7 +108,7 @@
             <!-- 节点与连线将动态插入此处 -->
         </div>
         <div class="absolute bottom-6 right-6 bg-white/80 backdrop-blur p-3 rounded-lg shadow-sm border border-slate-200 text-xs text-slate-500 pointer-events-none select-none">
-            <div class="flex items-center gap-2 mb-1"><i data-lucide="mouse-pointer-2" class="w-3 h-3"></i> 拖拽/缩放（开发中）</div>
+            <div class="flex items-center gap-2 mb-1"><i data-lucide="mouse-pointer-2" class="w-3 h-3"></i> 拖拽/缩放</div>
             <div class="flex items-center gap-2"><i data-lucide="focus" class="w-3 h-3"></i> 点击节点聚焦</div>
         </div>
     </aside>
@@ -179,14 +179,12 @@
         const DEEPSEEK_API_KEY = 'sk-569b424a96fd4804bc079dd4cbbce1ab';
 
         // streaming version of query using Fetch readable stream, parsing SSE data lines
-        async function queryDeepseek(question, onUpdate) {
+        async function queryDeepseek(messages, onUpdate) {
             const url = 'https://api.deepseek.com/chat/completions';
+            // messages 现在是完整的对话历史数组，包含 system 提示词
             const payload = {
                 model: 'deepseek-chat',
-                messages: [
-                    { role: 'system', content: 'You are a helpful assistant.' },
-                    { role: 'user', content: question }
-                ],
+                messages: messages,
                 stream: true
             };
             const resp = await fetch(url, {
@@ -474,6 +472,36 @@
             });
         }
 
+        // 构建对话历史：从当前焦点节点回溯到根节点，收集所有Q-A对
+        function buildConversationHistory(parentId) {
+            const history = [];
+            let nodeId = parentId;
+            while (nodeId) {
+                const node = chatNodes.find(n => n.id === nodeId);
+                if (!node) break;
+                history.unshift(node);  // 从前往后添加
+                nodeId = node.parentId;
+            }
+            return history;
+        }
+
+        // 将对话历史转换为 messages 格式供 API 使用
+        function buildMessagesArray(conversationHistory, currentQuestion) {
+            const messages = [
+                { role: 'system', content: 'You are a helpful assistant.' }
+            ];
+            // 添加历史对话
+            for (let historyNode of conversationHistory) {
+                messages.push({ role: 'user', content: historyNode.question });
+                if (historyNode.answer) {
+                    messages.push({ role: 'assistant', content: historyNode.answer });
+                }
+            }
+            // 添加当前问题
+            messages.push({ role: 'user', content: currentQuestion });
+            return messages;
+        }
+
         async function sendChat() {
             const input = document.getElementById('user-input');
             const q = input.value.trim();
@@ -487,9 +515,14 @@
             input.value = '';
             focusChatNode(node.id);
             newSession = false;
+            
+            // 构建完整的对话历史作为上下文
+            const conversationHistory = buildConversationHistory(parentId);
+            const messages = buildMessagesArray(conversationHistory, q);
+            
             // stream answer
             try {
-                await queryDeepseek(q, chunk => {
+                await queryDeepseek(messages, chunk => {
                     node.answer += chunk;
                     renderChatMap();
                     renderChatFlow();

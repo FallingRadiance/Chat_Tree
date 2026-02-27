@@ -1,8 +1,8 @@
-# Chattree - 对话树可视化应用
+# ChatTree - 对话树可视化应用
 
 ## 📋 项目介绍
 
-Chattree 是一个基于对话树结构的 AI 对话可视化应用。与传统线性聊天界面不同，本应用将对话组织成树状结构，允许用户在不同分支上探索不同的对话路径，创建多轮、多分支的复杂对话场景。
+ChatTree 是一个基于对话树结构的 AI 对话可视化应用。与传统线性聊天界面不同，本应用将对话组织成树状结构，允许用户在不同分支上探索不同的对话路径，创建多轮、多分支的复杂对话场景。
 
 ![example](assets/a6b6a50ab5cefa46c06ca7a5d149ed4b.png)
 
@@ -36,7 +36,7 @@ vercel --prod
 ```
 
 #### 方式二：本地运行
-1. 下载 `index.html` 文件
+1. 下载 `chat_tree.html` 文件
 2. 在文件中替换您的 DeepSeek API Key：
    ```javascript
    const DEEPSEEK_API_KEY = 'sk-your-api-key-here';

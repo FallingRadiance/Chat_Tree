@@ -4,7 +4,7 @@
 
 ChatTree 是一个基于对话树结构的 AI 对话可视化应用。与传统线性聊天界面不同，本应用将对话组织成树状结构，允许用户在不同分支上探索不同的对话路径，创建多轮、多分支的复杂对话场景。
 
-![example](assets/a6b6a50ab5cefa46c06ca7a5d149ed4b.png)
+![ChatTree 对话树示意图](assets/chat-tree-demo.png)
 
 ### ✨ 核心特性
 

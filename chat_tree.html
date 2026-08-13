@@ -177,6 +177,7 @@
 
         // please use your deepseek_api_key
         const DEEPSEEK_API_KEY = 'YOUR_API_KEY';
+        const MAX_CONTEXT_TURNS = 10;
 
         // streaming version of query using Fetch readable stream, parsing SSE data lines
         async function queryDeepseek(messages, onUpdate) {
@@ -490,8 +491,9 @@
             const messages = [
                 { role: 'system', content: 'You are a helpful assistant.' }
             ];
-            // 添加历史对话
-            for (let historyNode of conversationHistory) {
+            // 仅保留当前分支最近的 10 轮对话，避免上下文无限增长
+            const recentHistory = conversationHistory.slice(-MAX_CONTEXT_TURNS);
+            for (let historyNode of recentHistory) {
                 messages.push({ role: 'user', content: historyNode.question });
                 if (historyNode.answer) {
                     messages.push({ role: 'assistant', content: historyNode.answer });
